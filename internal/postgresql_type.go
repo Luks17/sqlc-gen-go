@@ -587,7 +587,7 @@ func postgresType(req *plugin.GenerateRequest, options *opts.Options, col *plugi
 						}
 
 					}
-					if options.ModelsPackageImportPath != "" {
+					if options.OutputModelsPackage != "" {
 						return options.OutputModelsPackage + "." + enumName
 					}
 					return enumName

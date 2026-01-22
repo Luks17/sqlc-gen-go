@@ -234,7 +234,7 @@ func generate(req *plugin.GenerateRequest, options *opts.Options, enums []Enum, 
 
 	output := map[string]string{}
 
-	execute := func(name, packageName, templateName string) error {
+	execute := func(name, packageName, directory, templateName string) error {
 		imports := i.Imports(name)
 		replacedQueries := replaceConflictedArg(imports, queries)
 
@@ -254,10 +254,11 @@ func generate(req *plugin.GenerateRequest, options *opts.Options, enums []Enum, 
 			return fmt.Errorf("source error: %w", err)
 		}
 
+		if directory != "" {
+			name = filepath.Join(directory, name)
+		}
+
 		if templateName == "queryFile" {
-			if options.OutputQueryFilesDirectory != "" {
-				name = filepath.Join(options.OutputQueryFilesDirectory, name)
-			}
 			if options.OutputFilesSuffix != "" {
 				name += options.OutputFilesSuffix
 			}
@@ -274,14 +275,17 @@ func generate(req *plugin.GenerateRequest, options *opts.Options, enums []Enum, 
 	if options.OutputDbFileName != "" {
 		dbFileName = options.OutputDbFileName
 	}
+
 	modelsFileName := "models.go"
 	if options.OutputModelsFileName != "" {
 		modelsFileName = options.OutputModelsFileName
 	}
+
 	querierFileName := "querier.go"
 	if options.OutputQuerierFileName != "" {
 		querierFileName = options.OutputQuerierFileName
 	}
+
 	copyfromFileName := "copyfrom.go"
 	if options.OutputCopyfromFileName != "" {
 		copyfromFileName = options.OutputCopyfromFileName
@@ -297,24 +301,24 @@ func generate(req *plugin.GenerateRequest, options *opts.Options, enums []Enum, 
 		modelsPackageName = options.OutputModelsPackage
 	}
 
-	if err := execute(dbFileName, options.Package, "dbFile"); err != nil {
+	if err := execute(dbFileName, options.Package, options.OutputDirectory, "dbFile"); err != nil {
 		return nil, err
 	}
-	if err := execute(modelsFileName, modelsPackageName, "modelsFile"); err != nil {
+	if err := execute(modelsFileName, modelsPackageName, options.OutputModelsDirectory, "modelsFile"); err != nil {
 		return nil, err
 	}
 	if options.EmitInterface {
-		if err := execute(querierFileName, options.Package, "interfaceFile"); err != nil {
+		if err := execute(querierFileName, options.Package, options.OutputDirectory, "interfaceFile"); err != nil {
 			return nil, err
 		}
 	}
 	if tctx.UsesCopyFrom {
-		if err := execute(copyfromFileName, options.Package, "copyfromFile"); err != nil {
+		if err := execute(copyfromFileName, options.Package, options.OutputDirectory, "copyfromFile"); err != nil {
 			return nil, err
 		}
 	}
 	if tctx.UsesBatch {
-		if err := execute(batchFileName, options.Package, "batchFile"); err != nil {
+		if err := execute(batchFileName, options.Package, options.OutputDirectory, "batchFile"); err != nil {
 			return nil, err
 		}
 	}
@@ -325,7 +329,7 @@ func generate(req *plugin.GenerateRequest, options *opts.Options, enums []Enum, 
 	}
 
 	for source := range files {
-		if err := execute(source, options.Package, "queryFile"); err != nil {
+		if err := execute(source, options.Package, options.OutputDirectory, "queryFile"); err != nil {
 			return nil, err
 		}
 	}
@@ -403,7 +407,7 @@ func filterUnusedStructs(options *opts.Options, enums []Enum, structs []Struct, 
 	keepEnums := make([]Enum, 0, len(enums))
 	for _, enum := range enums {
 		var enumType string
-		if options.ModelsPackageImportPath != "" {
+		if options.OutputModelsPackage != "" {
 			enumType = options.OutputModelsPackage + "." + enum.Name
 		} else {
 			enumType = enum.Name

@@ -32,14 +32,17 @@ type Options struct {
 	Rename                      map[string]string `json:"rename,omitempty" yaml:"rename"`
 	SqlPackage                  string            `json:"sql_package" yaml:"sql_package"`
 	SqlDriver                   string            `json:"sql_driver" yaml:"sql_driver"`
+	BaseImportPath              string            `json:"base_import_path" yaml:"base_import_path"`
 	OutputBatchFileName         string            `json:"output_batch_file_name,omitempty" yaml:"output_batch_file_name"`
 	OutputDbFileName            string            `json:"output_db_file_name,omitempty" yaml:"output_db_file_name"`
 	OutputModelsFileName        string            `json:"output_models_file_name,omitempty" yaml:"output_models_file_name"`
+	OutputModelsDirectory       string            `json:"output_models_directory,omitempty" yaml:"output_models_directory"`
 	OutputModelsPackage         string            `json:"output_models_package,omitempty" yaml:"output_models_package"`
-	ModelsPackageImportPath     string            `json:"models_package_import_path,omitempty" yaml:"models_package_import_path"`
 	OutputQuerierFileName       string            `json:"output_querier_file_name,omitempty" yaml:"output_querier_file_name"`
+	OutputQuerierDirectory      string            `json:"output_querier_directory,omitempty" yaml:"output_querier_directory"`
+	OutputQuerierPackage        string            `json:"output_querier_package,omitempty" yaml:"output_querier_package"`
 	OutputCopyfromFileName      string            `json:"output_copyfrom_file_name,omitempty" yaml:"output_copyfrom_file_name"`
-	OutputQueryFilesDirectory   string            `json:"output_query_files_directory,omitempty" yaml:"output_query_files_directory"`
+	OutputDirectory             string            `json:"output_directory,omitempty" yaml:"output_directory"`
 	OutputFilesSuffix           string            `json:"output_files_suffix,omitempty" yaml:"output_files_suffix"`
 	InflectionExcludeTableNames []string          `json:"inflection_exclude_table_names,omitempty" yaml:"inflection_exclude_table_names"`
 	QueryParameterLimit         *int32            `json:"query_parameter_limit,omitempty" yaml:"query_parameter_limit"`
@@ -49,6 +52,26 @@ type Options struct {
 	Initialisms                 *[]string         `json:"initialisms,omitempty" yaml:"initialisms"`
 
 	InitialismsMap map[string]struct{} `json:"-" yaml:"-"`
+}
+
+func (o *Options) importPath(dir string) string {
+	if o.BaseImportPath == "" {
+		panic("BaseImportPath must be set when separating packages")
+	}
+
+	if dir == "" && o.OutputDirectory != "" {
+		dir = o.OutputDirectory
+	}
+
+	return filepath.Join(o.BaseImportPath, dir)
+}
+
+func (o *Options) ModelsImportPath() string {
+	return o.importPath(o.OutputModelsDirectory)
+}
+
+func (o *Options) QueryFilesImportPath() string {
+	return o.importPath("")
 }
 
 type GlobalOptions struct {
@@ -153,11 +176,15 @@ func ValidateOpts(opts *Options) error {
 	if *opts.QueryParameterLimit < 0 {
 		return fmt.Errorf("invalid options: query parameter limit must not be negative")
 	}
-	if opts.OutputModelsPackage != "" && opts.ModelsPackageImportPath == "" {
-		return fmt.Errorf("invalid options: models_package_import_path must be set when output_models_package is used")
+
+	output_package_opts := map[string]string{
+		"output_models_package":  opts.OutputModelsPackage,
+		"output_querier_package": opts.OutputQuerierPackage,
 	}
-	if opts.ModelsPackageImportPath != "" && opts.OutputModelsPackage == "" {
-		return fmt.Errorf("invalid options: output_models_package must be set when models_package_import_path is used")
+	for k, v := range output_package_opts {
+		if v != "" && opts.BaseImportPath == "" {
+			return fmt.Errorf("invalid options: base_import_path must be set when %s is used", k)
+		}
 	}
 
 	return nil

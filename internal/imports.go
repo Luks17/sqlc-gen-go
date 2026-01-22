@@ -244,7 +244,7 @@ func buildImports(options *opts.Options, queries []Query, outputFile OutputFile,
 	}
 
 	requiresModelsPackageImport := func() bool {
-		if options.ModelsPackageImportPath == "" {
+		if options.OutputModelsPackage == "" {
 			return false
 		}
 
@@ -281,7 +281,7 @@ func buildImports(options *opts.Options, queries []Query, outputFile OutputFile,
 		return false
 	}
 	if requiresModelsPackageImport() {
-		pkg[ImportSpec{Path: options.ModelsPackageImportPath}] = struct{}{}
+		pkg[ImportSpec{Path: options.ModelsImportPath()}] = struct{}{}
 	}
 
 	return std, pkg
