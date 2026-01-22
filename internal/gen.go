@@ -18,13 +18,14 @@ import (
 )
 
 type tmplCtx struct {
-	Q           string
-	Package     string
-	SQLDriver   opts.SQLDriver
-	Enums       []Enum
-	Structs     []Struct
-	GoQueries   []Query
-	SqlcVersion string
+	Q            string
+	Package      string
+	QueryPackage string
+	SQLDriver    opts.SQLDriver
+	Enums        []Enum
+	Structs      []Struct
+	GoQueries    []Query
+	SqlcVersion  string
 
 	// TODO: Race conditions
 	SourceName string
@@ -42,6 +43,48 @@ type tmplCtx struct {
 	UsesBatch                 bool
 	OmitSqlcVersion           bool
 	BuildTags                 string
+	QualifyQueryTypes         bool
+	QueryTypes                map[string]struct{}
+}
+
+func (t *tmplCtx) codegenQualifyType(typ string) string {
+	if !t.QualifyQueryTypes || t.QueryPackage == "" {
+		return typ
+	}
+	// If the interface is emitted in a different package, we need to qualify
+	// references to types defined in the query package.
+	if strings.HasPrefix(typ, "*") {
+		return "*" + t.codegenQualifyType(strings.TrimPrefix(typ, "*"))
+	}
+	if strings.HasPrefix(typ, "[]") {
+		return "[]" + t.codegenQualifyType(strings.TrimPrefix(typ, "[]"))
+	}
+	if strings.Contains(typ, ".") {
+		return typ
+	}
+	if _, ok := t.QueryTypes[typ]; ok {
+		return t.QueryPackage + "." + typ
+	}
+	return typ
+}
+
+func (t *tmplCtx) codegenArgPair(arg QueryValue) string {
+	if arg.isEmpty() {
+		return ""
+	}
+	args := arg.Pairs()
+	out := make([]string, 0, len(args))
+	for _, a := range args {
+		out = append(out, a.Name+" "+t.codegenQualifyType(a.Type))
+	}
+	return strings.Join(out, ",")
+}
+
+func (t *tmplCtx) codegenArgSlicePair(arg QueryValue) string {
+	if arg.isEmpty() {
+		return ""
+	}
+	return arg.Name + " []" + t.codegenQualifyType(arg.DefineType())
 }
 
 func (t *tmplCtx) OutputQuery(sourceName string) bool {
@@ -161,6 +204,22 @@ func validate(options *opts.Options, enums []Enum, structs []Struct, queries []Q
 }
 
 func generate(req *plugin.GenerateRequest, options *opts.Options, enums []Enum, structs []Struct, queries []Query) (*plugin.GenerateResponse, error) {
+	queryTypes := map[string]struct{}{
+		"DBTX":    {},
+		"Queries": {},
+	}
+	for _, q := range queries {
+		if q.Arg.EmitStruct() {
+			queryTypes[q.Arg.Type()] = struct{}{}
+		}
+		if q.hasRetType() && q.Ret.EmitStruct() {
+			queryTypes[q.Ret.Type()] = struct{}{}
+		}
+		if strings.HasPrefix(q.Cmd, ":batch") {
+			queryTypes[q.MethodName+"BatchResults"] = struct{}{}
+		}
+	}
+
 	i := &importer{
 		Options: options,
 		Queries: queries,
@@ -183,11 +242,13 @@ func generate(req *plugin.GenerateRequest, options *opts.Options, enums []Enum, 
 		SQLDriver:                 parseDriver(options.SqlPackage),
 		Q:                         "`",
 		Package:                   options.Package,
+		QueryPackage:              options.Package,
 		Enums:                     enums,
 		Structs:                   structs,
 		SqlcVersion:               req.SqlcVersion,
 		BuildTags:                 options.BuildTags,
 		OmitSqlcVersion:           options.OmitSqlcVersion,
+		QueryTypes:                queryTypes,
 	}
 
 	if tctx.UsesCopyFrom && !tctx.SQLDriver.IsPGX() && options.SqlDriver != opts.SQLDriverGoSQLDriverMySQL {
@@ -206,13 +267,17 @@ func generate(req *plugin.GenerateRequest, options *opts.Options, enums []Enum, 
 	}
 
 	funcMap := template.FuncMap{
-		"lowerTitle": sdk.LowerTitle,
-		"comment":    sdk.DoubleSlashComment,
-		"escape":     sdk.EscapeBacktick,
-		"imports":    i.Imports,
-		"hasImports": i.HasImports,
-		"hasPrefix":  strings.HasPrefix,
-		"trimPrefix": strings.TrimPrefix,
+		"lowerTitle":   sdk.LowerTitle,
+		"comment":      sdk.DoubleSlashComment,
+		"escape":       sdk.EscapeBacktick,
+		"imports":      i.Imports,
+		"hasImports":   i.HasImports,
+		"hasPrefix":    strings.HasPrefix,
+		"trimPrefix":   strings.TrimPrefix,
+		"queryPkg":     func() string { return tctx.QueryPackage },
+		"qualifyType":  tctx.codegenQualifyType,
+		"argPair":      tctx.codegenArgPair,
+		"argSlicePair": tctx.codegenArgSlicePair,
 
 		// These methods are Go specific, they do not belong in the codegen package
 		// (as that is language independent)
@@ -243,6 +308,7 @@ func generate(req *plugin.GenerateRequest, options *opts.Options, enums []Enum, 
 		tctx.SourceName = name
 		tctx.GoQueries = replacedQueries
 		tctx.Package = packageName
+		tctx.QualifyQueryTypes = templateName == "interfaceFile" && packageName != tctx.QueryPackage
 		err := tmpl.ExecuteTemplate(w, templateName, &tctx)
 		w.Flush()
 		if err != nil {
@@ -308,7 +374,11 @@ func generate(req *plugin.GenerateRequest, options *opts.Options, enums []Enum, 
 		return nil, err
 	}
 	if options.EmitInterface {
-		if err := execute(querierFileName, options.Package, options.OutputDirectory, "interfaceFile"); err != nil {
+		querierPackageName := options.Package
+		if options.OutputQuerierPackage != "" {
+			querierPackageName = options.OutputQuerierPackage
+		}
+		if err := execute(querierFileName, querierPackageName, options.OutputQuerierDirectory, "interfaceFile"); err != nil {
 			return nil, err
 		}
 	}

@@ -5,59 +5,59 @@
         {{- if and (eq .Cmd ":one") ($dbtxParam) }}
             {{range .Comments}}//{{.}}
             {{end -}}
-            {{.MethodName}}(ctx context.Context, db DBTX, {{.Arg.Pair}}) ({{.Ret.DefineType}}, error)
+            {{.MethodName}}(ctx context.Context, db {{if $.QualifyQueryTypes}}{{queryPkg}}.DBTX{{else}}DBTX{{end}}, {{argPair .Arg}}) ({{qualifyType .Ret.DefineType}}, error)
         {{- else if eq .Cmd ":one"}}
             {{range .Comments}}//{{.}}
             {{end -}}
-            {{.MethodName}}(ctx context.Context, {{.Arg.Pair}}) ({{.Ret.DefineType}}, error)
+            {{.MethodName}}(ctx context.Context, {{argPair .Arg}}) ({{qualifyType .Ret.DefineType}}, error)
         {{- end}}
         {{- if and (eq .Cmd ":many") ($dbtxParam) }}
             {{range .Comments}}//{{.}}
             {{end -}}
-            {{.MethodName}}(ctx context.Context, db DBTX, {{.Arg.Pair}}) ([]{{.Ret.DefineType}}, error)
+            {{.MethodName}}(ctx context.Context, db {{if $.QualifyQueryTypes}}{{queryPkg}}.DBTX{{else}}DBTX{{end}}, {{argPair .Arg}}) ([]{{qualifyType .Ret.DefineType}}, error)
         {{- else if eq .Cmd ":many"}}
             {{range .Comments}}//{{.}}
             {{end -}}
-            {{.MethodName}}(ctx context.Context, {{.Arg.Pair}}) ([]{{.Ret.DefineType}}, error)
+            {{.MethodName}}(ctx context.Context, {{argPair .Arg}}) ([]{{qualifyType .Ret.DefineType}}, error)
         {{- end}}
         {{- if and (eq .Cmd ":exec") ($dbtxParam) }}
             {{range .Comments}}//{{.}}
             {{end -}}
-            {{.MethodName}}(ctx context.Context, db DBTX, {{.Arg.Pair}}) error
+            {{.MethodName}}(ctx context.Context, db {{if $.QualifyQueryTypes}}{{queryPkg}}.DBTX{{else}}DBTX{{end}}, {{argPair .Arg}}) error
         {{- else if eq .Cmd ":exec"}}
             {{range .Comments}}//{{.}}
             {{end -}}
-            {{.MethodName}}(ctx context.Context, {{.Arg.Pair}}) error
+            {{.MethodName}}(ctx context.Context, {{argPair .Arg}}) error
         {{- end}}
         {{- if and (eq .Cmd ":execrows") ($dbtxParam) }}
             {{range .Comments}}//{{.}}
             {{end -}}
-            {{.MethodName}}(ctx context.Context, db DBTX, {{.Arg.Pair}}) (int64, error)
+            {{.MethodName}}(ctx context.Context, db {{if $.QualifyQueryTypes}}{{queryPkg}}.DBTX{{else}}DBTX{{end}}, {{argPair .Arg}}) (int64, error)
         {{- else if eq .Cmd ":execrows"}}
             {{range .Comments}}//{{.}}
             {{end -}}
-            {{.MethodName}}(ctx context.Context, {{.Arg.Pair}}) (int64, error)
+            {{.MethodName}}(ctx context.Context, {{argPair .Arg}}) (int64, error)
         {{- end}}
         {{- if and (eq .Cmd ":execlastid") ($dbtxParam) }}
             {{range .Comments}}//{{.}}
             {{end -}}
-            {{.MethodName}}(ctx context.Context, db DBTX, {{.Arg.Pair}}) (int64, error)
+            {{.MethodName}}(ctx context.Context, db {{if $.QualifyQueryTypes}}{{queryPkg}}.DBTX{{else}}DBTX{{end}}, {{argPair .Arg}}) (int64, error)
         {{- else if eq .Cmd ":execlastid"}}
             {{range .Comments}}//{{.}}
             {{end -}}
-            {{.MethodName}}(ctx context.Context, {{.Arg.Pair}}) (int64, error)
+            {{.MethodName}}(ctx context.Context, {{argPair .Arg}}) (int64, error)
         {{- end}}
         {{- if and (eq .Cmd ":execresult") ($dbtxParam) }}
             {{range .Comments}}//{{.}}
             {{end -}}
-            {{.MethodName}}(ctx context.Context, db DBTX, {{.Arg.Pair}}) (sql.Result, error)
+            {{.MethodName}}(ctx context.Context, db {{if $.QualifyQueryTypes}}{{queryPkg}}.DBTX{{else}}DBTX{{end}}, {{argPair .Arg}}) (sql.Result, error)
         {{- else if eq .Cmd ":execresult"}}
             {{range .Comments}}//{{.}}
             {{end -}}
-            {{.MethodName}}(ctx context.Context, {{.Arg.Pair}}) (sql.Result, error)
+            {{.MethodName}}(ctx context.Context, {{argPair .Arg}}) (sql.Result, error)
         {{- end}}
     {{- end}}
     }
 
-    var _ Querier = (*Queries)(nil)
+    var _ Querier = (*{{qualifyType "Queries"}})(nil)
 {{end}}

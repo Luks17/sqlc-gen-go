@@ -308,6 +308,9 @@ func (i *importer) interfaceImports() fileImports {
 	})
 
 	std["context"] = struct{}{}
+	if i.Options.OutputQuerierPackage != "" && i.Options.OutputQuerierPackage != i.Options.Package {
+		pkg[ImportSpec{Path: i.Options.QueryFilesImportPath(), ID: i.Options.Package}] = struct{}{}
+	}
 
 	return sortedImports(std, pkg)
 }
