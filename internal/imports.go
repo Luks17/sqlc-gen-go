@@ -58,10 +58,12 @@ func mergeImports(imps ...fileImports) [][]ImportSpec {
 }
 
 type importer struct {
-	Options *opts.Options
-	Queries []Query
-	Enums   []Enum
-	Structs []Struct
+	Options          *opts.Options
+	Queries          []Query
+	Enums            []Enum
+	Structs          []Struct
+	ParamsStructs    []Struct
+	RowResultStructs []Struct
 }
 
 func (i *importer) usesType(typ string) bool {
@@ -93,6 +95,14 @@ func (i *importer) Imports(filename string) [][]ImportSpec {
 	if i.Options.OutputQuerierFileName != "" {
 		querierFileName = i.Options.OutputQuerierFileName
 	}
+	paramsFileName := "params.go"
+	if i.Options.OutputParamsFileName != "" {
+		paramsFileName = i.Options.OutputParamsFileName
+	}
+	rowResultsFileName := "row_results.go"
+	if i.Options.OutputRowResultsFileName != "" {
+		rowResultsFileName = i.Options.OutputRowResultsFileName
+	}
 	copyfromFileName := "copyfrom.go"
 	if i.Options.OutputCopyfromFileName != "" {
 		copyfromFileName = i.Options.OutputCopyfromFileName
@@ -109,6 +119,10 @@ func (i *importer) Imports(filename string) [][]ImportSpec {
 		return mergeImports(i.modelImports())
 	case querierFileName:
 		return mergeImports(i.interfaceImports())
+	case paramsFileName:
+		return mergeImports(i.paramsImports())
+	case rowResultsFileName:
+		return mergeImports(i.rowResultsImports())
 	case copyfromFileName:
 		return mergeImports(i.copyfromImports())
 	case batchFileName:
@@ -254,26 +268,9 @@ func buildImports(options *opts.Options, queries []Query, outputFile OutputFile,
 				return true
 			}
 
-			// Check if the return type struct contains a type from models package (possibly an enum field or an embedded struct)
-			if outputFile != OutputFileInterface && q.hasRetType() && q.Ret.IsStruct() {
-				for _, f := range q.Ret.Struct.Fields {
-					if strings.HasPrefix(f.Type, options.OutputModelsPackage+".") {
-						return true
-					}
-				}
-			}
-
-			// Check if the argument type is from models package (possibly an enum)
-			if !q.Arg.isEmpty() && strings.HasPrefix(q.Arg.Type(), options.OutputModelsPackage+".") {
-				return true
-			}
-
-			// Check if the argument struct contains a type from models package (possibly an enum field)
-			if outputFile != OutputFileInterface && !q.Arg.isEmpty() && q.Arg.IsStruct() {
-				for _, f := range q.Arg.Struct.Fields {
-					if strings.HasPrefix(f.Type, options.OutputModelsPackage+".") {
-						return true
-					}
+			for _, a := range q.Arg.Pairs() {
+				if strings.HasPrefix(trimSliceAndPointerPrefix(a.Type), options.OutputModelsPackage+".") {
+					return true
 				}
 			}
 
@@ -308,6 +305,12 @@ func (i *importer) interfaceImports() fileImports {
 	})
 
 	std["context"] = struct{}{}
+	if i.Options.OutputParamsPackage != "" && i.Options.OutputParamsPackage != i.Options.Package {
+		pkg[ImportSpec{Path: i.Options.ParamsImportPath(), ID: i.Options.OutputParamsPackage}] = struct{}{}
+	}
+	if i.Options.OutputRowResultsPackage != "" && i.Options.OutputRowResultsPackage != i.Options.Package {
+		pkg[ImportSpec{Path: i.Options.RowResultsImportPath(), ID: i.Options.OutputRowResultsPackage}] = struct{}{}
+	}
 	if i.Options.OutputQuerierPackage != "" && i.Options.OutputQuerierPackage != i.Options.Package {
 		pkg[ImportSpec{Path: i.Options.QueryFilesImportPath(), ID: i.Options.Package}] = struct{}{}
 	}
@@ -358,23 +361,8 @@ func (i *importer) queryImports(filename string) fileImports {
 	std, pkg := buildImports(i.Options, gq, OutputFileQuery, func(name string) bool {
 		for _, q := range gq {
 			if q.hasRetType() {
-				if q.Ret.EmitStruct() {
-					for _, f := range q.Ret.Struct.Fields {
-						if hasPrefixIgnoringSliceAndPointerPrefix(f.Type, name) {
-							return true
-						}
-					}
-				}
 				if hasPrefixIgnoringSliceAndPointerPrefix(q.Ret.Type(), name) {
 					return true
-				}
-			}
-			// Check the fields of the argument struct if it's emitted
-			if q.Arg.EmitStruct() {
-				for _, f := range q.Arg.Struct.Fields {
-					if hasPrefixIgnoringSliceAndPointerPrefix(f.Type, name) {
-						return true
-					}
 				}
 			}
 			// Check the argument pairs inside the method definition
@@ -386,6 +374,32 @@ func (i *importer) queryImports(filename string) fileImports {
 		}
 		return false
 	})
+
+	needsParamsImport := false
+	if i.Options.OutputParamsPackage != "" && i.Options.OutputParamsPackage != i.Options.Package {
+		for _, q := range gq {
+			if q.Arg.EmitStruct() && q.Cmd != ":copyfrom" {
+				needsParamsImport = true
+				break
+			}
+		}
+	}
+	if needsParamsImport {
+		pkg[ImportSpec{Path: i.Options.ParamsImportPath(), ID: i.Options.OutputParamsPackage}] = struct{}{}
+	}
+
+	needsRowResultsImport := false
+	if i.Options.OutputRowResultsPackage != "" && i.Options.OutputRowResultsPackage != i.Options.Package {
+		for _, q := range gq {
+			if q.hasRetType() && q.Ret.EmitStruct() {
+				needsRowResultsImport = true
+				break
+			}
+		}
+	}
+	if needsRowResultsImport {
+		pkg[ImportSpec{Path: i.Options.RowResultsImportPath(), ID: i.Options.OutputRowResultsPackage}] = struct{}{}
+	}
 
 	sliceScan := func() bool {
 		for _, q := range gq {
@@ -464,8 +478,10 @@ func (i *importer) copyfromImports() fileImports {
 				}
 			}
 			if !q.Arg.isEmpty() {
-				if strings.HasPrefix(q.Arg.Type(), name) {
-					return true
+				for _, f := range q.Arg.Pairs() {
+					if strings.HasPrefix(f.Type, name) {
+						return true
+					}
 				}
 			}
 		}
@@ -473,6 +489,14 @@ func (i *importer) copyfromImports() fileImports {
 	})
 
 	std["context"] = struct{}{}
+	if i.Options.OutputParamsPackage != "" && i.Options.OutputParamsPackage != i.Options.Package {
+		for _, q := range copyFromQueries {
+			if q.Arg.EmitStruct() {
+				pkg[ImportSpec{Path: i.Options.ParamsImportPath(), ID: i.Options.OutputParamsPackage}] = struct{}{}
+				break
+			}
+		}
+	}
 	if i.Options.SqlDriver == opts.SQLDriverGoSQLDriverMySQL {
 		std["io"] = struct{}{}
 		std["fmt"] = struct{}{}
@@ -494,22 +518,8 @@ func (i *importer) batchImports() fileImports {
 	std, pkg := buildImports(i.Options, batchQueries, OutputFileBatch, func(name string) bool {
 		for _, q := range batchQueries {
 			if q.hasRetType() {
-				if q.Ret.EmitStruct() {
-					for _, f := range q.Ret.Struct.Fields {
-						if hasPrefixIgnoringSliceAndPointerPrefix(f.Type, name) {
-							return true
-						}
-					}
-				}
 				if hasPrefixIgnoringSliceAndPointerPrefix(q.Ret.Type(), name) {
 					return true
-				}
-			}
-			if q.Arg.EmitStruct() {
-				for _, f := range q.Arg.Struct.Fields {
-					if hasPrefixIgnoringSliceAndPointerPrefix(f.Type, name) {
-						return true
-					}
 				}
 			}
 			for _, f := range q.Arg.Pairs() {
@@ -523,12 +533,102 @@ func (i *importer) batchImports() fileImports {
 
 	std["context"] = struct{}{}
 	std["errors"] = struct{}{}
+	if i.Options.OutputParamsPackage != "" && i.Options.OutputParamsPackage != i.Options.Package {
+		for _, q := range batchQueries {
+			if q.Arg.EmitStruct() {
+				pkg[ImportSpec{Path: i.Options.ParamsImportPath(), ID: i.Options.OutputParamsPackage}] = struct{}{}
+				break
+			}
+		}
+	}
+	if i.Options.OutputRowResultsPackage != "" && i.Options.OutputRowResultsPackage != i.Options.Package {
+		for _, q := range batchQueries {
+			if q.hasRetType() && q.Ret.EmitStruct() {
+				pkg[ImportSpec{Path: i.Options.RowResultsImportPath(), ID: i.Options.OutputRowResultsPackage}] = struct{}{}
+				break
+			}
+		}
+	}
 	sqlpkg := parseDriver(i.Options.SqlPackage)
 	switch sqlpkg {
 	case opts.SQLDriverPGXV4:
 		pkg[ImportSpec{Path: "github.com/jackc/pgx/v4"}] = struct{}{}
 	case opts.SQLDriverPGXV5:
 		pkg[ImportSpec{Path: "github.com/jackc/pgx/v5"}] = struct{}{}
+	}
+
+	return sortedImports(std, pkg)
+}
+
+func (i *importer) paramsImports() fileImports {
+	std, pkg := buildImports(i.Options, nil, OutputFileParams, func(name string) bool {
+		for _, strct := range i.ParamsStructs {
+			for _, f := range strct.Fields {
+				if hasPrefixIgnoringSliceAndPointerPrefix(f.Type, name) {
+					return true
+				}
+				for _, embed := range f.EmbedFields {
+					if hasPrefixIgnoringSliceAndPointerPrefix(embed.Type, name) {
+						return true
+					}
+				}
+			}
+		}
+		return false
+	})
+
+	if i.Options.OutputModelsPackage != "" {
+		for _, strct := range i.ParamsStructs {
+			for _, f := range strct.Fields {
+				if hasPrefixIgnoringSliceAndPointerPrefix(f.Type, i.Options.OutputModelsPackage+".") {
+					pkg[ImportSpec{Path: i.Options.ModelsImportPath()}] = struct{}{}
+					return sortedImports(std, pkg)
+				}
+				for _, embed := range f.EmbedFields {
+					if hasPrefixIgnoringSliceAndPointerPrefix(embed.Type, i.Options.OutputModelsPackage+".") {
+						pkg[ImportSpec{Path: i.Options.ModelsImportPath()}] = struct{}{}
+						return sortedImports(std, pkg)
+					}
+				}
+			}
+		}
+	}
+
+	return sortedImports(std, pkg)
+}
+
+func (i *importer) rowResultsImports() fileImports {
+	std, pkg := buildImports(i.Options, nil, OutputFileRowResult, func(name string) bool {
+		for _, strct := range i.RowResultStructs {
+			for _, f := range strct.Fields {
+				if hasPrefixIgnoringSliceAndPointerPrefix(f.Type, name) {
+					return true
+				}
+				for _, embed := range f.EmbedFields {
+					if hasPrefixIgnoringSliceAndPointerPrefix(embed.Type, name) {
+						return true
+					}
+				}
+			}
+		}
+		return false
+	})
+
+	if i.Options.OutputModelsPackage != "" {
+		for _, strct := range i.RowResultStructs {
+			for _, f := range strct.Fields {
+				if hasPrefixIgnoringSliceAndPointerPrefix(f.Type, i.Options.OutputModelsPackage+".") {
+					pkg[ImportSpec{Path: i.Options.ModelsImportPath()}] = struct{}{}
+					return sortedImports(std, pkg)
+				}
+				for _, embed := range f.EmbedFields {
+					if hasPrefixIgnoringSliceAndPointerPrefix(embed.Type, i.Options.OutputModelsPackage+".") {
+						pkg[ImportSpec{Path: i.Options.ModelsImportPath()}] = struct{}{}
+						return sortedImports(std, pkg)
+					}
+				}
+			}
+		}
 	}
 
 	return sortedImports(std, pkg)

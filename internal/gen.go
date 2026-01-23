@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"go/format"
 	"path/filepath"
+	"sort"
 	"strings"
 	"text/template"
 
@@ -18,14 +19,16 @@ import (
 )
 
 type tmplCtx struct {
-	Q            string
-	Package      string
-	QueryPackage string
-	SQLDriver    opts.SQLDriver
-	Enums        []Enum
-	Structs      []Struct
-	GoQueries    []Query
-	SqlcVersion  string
+	Q                string
+	Package          string
+	QueryPackage     string
+	SQLDriver        opts.SQLDriver
+	Enums            []Enum
+	Structs          []Struct
+	ParamsStructs    []Struct
+	RowResultStructs []Struct
+	GoQueries        []Query
+	SqlcVersion      string
 
 	// TODO: Race conditions
 	SourceName string
@@ -48,6 +51,23 @@ type tmplCtx struct {
 }
 
 func (t *tmplCtx) codegenQualifyType(typ string) string {
+	if t.Package != "" {
+		// If a type is already qualified with the current package, strip the prefix.
+		// (A package cannot import itself.)
+		prefix := t.Package + "."
+		if strings.HasPrefix(typ, prefix) {
+			return strings.TrimPrefix(typ, prefix)
+		}
+		if strings.HasPrefix(typ, "*"+prefix) {
+			return "*" + strings.TrimPrefix(typ, "*"+prefix)
+		}
+		if strings.HasPrefix(typ, "[]"+prefix) {
+			return "[]" + strings.TrimPrefix(typ, "[]"+prefix)
+		}
+		if strings.HasPrefix(typ, "[]*"+prefix) {
+			return "[]*" + strings.TrimPrefix(typ, "[]*"+prefix)
+		}
+	}
 	if !t.QualifyQueryTypes || t.QueryPackage == "" {
 		return typ
 	}
@@ -204,6 +224,34 @@ func validate(options *opts.Options, enums []Enum, structs []Struct, queries []Q
 }
 
 func generate(req *plugin.GenerateRequest, options *opts.Options, enums []Enum, structs []Struct, queries []Query) (*plugin.GenerateResponse, error) {
+	paramsStructs := map[string]Struct{}
+	rowResultStructs := map[string]Struct{}
+	for qi := range queries {
+		q := &queries[qi]
+		if q.Arg.EmitStruct() && q.Arg.Struct != nil {
+			if options.OutputParamsPackage != "" {
+				q.Arg.Struct.Package = options.OutputParamsPackage
+			}
+			paramsStructs[q.Arg.Struct.Name] = *q.Arg.Struct
+		}
+		if q.hasRetType() && q.Ret.EmitStruct() && q.Ret.Struct != nil {
+			if options.OutputRowResultsPackage != "" {
+				q.Ret.Struct.Package = options.OutputRowResultsPackage
+			}
+			rowResultStructs[q.Ret.Struct.Name] = *q.Ret.Struct
+		}
+	}
+	paramsList := make([]Struct, 0, len(paramsStructs))
+	for _, s := range paramsStructs {
+		paramsList = append(paramsList, s)
+	}
+	sort.Slice(paramsList, func(i, j int) bool { return paramsList[i].Name < paramsList[j].Name })
+	rowResultsList := make([]Struct, 0, len(rowResultStructs))
+	for _, s := range rowResultStructs {
+		rowResultsList = append(rowResultsList, s)
+	}
+	sort.Slice(rowResultsList, func(i, j int) bool { return rowResultsList[i].Name < rowResultsList[j].Name })
+
 	queryTypes := map[string]struct{}{
 		"DBTX":    {},
 		"Queries": {},
@@ -219,12 +267,22 @@ func generate(req *plugin.GenerateRequest, options *opts.Options, enums []Enum, 
 			queryTypes[q.MethodName+"BatchResults"] = struct{}{}
 		}
 	}
+	for _, s := range paramsList {
+		queryTypes[s.Type()] = struct{}{}
+		queryTypes[s.Name] = struct{}{}
+	}
+	for _, s := range rowResultsList {
+		queryTypes[s.Type()] = struct{}{}
+		queryTypes[s.Name] = struct{}{}
+	}
 
 	i := &importer{
-		Options: options,
-		Queries: queries,
-		Enums:   enums,
-		Structs: structs,
+		Options:          options,
+		Queries:          queries,
+		Enums:            enums,
+		Structs:          structs,
+		ParamsStructs:    paramsList,
+		RowResultStructs: rowResultsList,
 	}
 
 	tctx := tmplCtx{
@@ -245,6 +303,8 @@ func generate(req *plugin.GenerateRequest, options *opts.Options, enums []Enum, 
 		QueryPackage:              options.Package,
 		Enums:                     enums,
 		Structs:                   structs,
+		ParamsStructs:             paramsList,
+		RowResultStructs:          rowResultsList,
 		SqlcVersion:               req.SqlcVersion,
 		BuildTags:                 options.BuildTags,
 		OmitSqlcVersion:           options.OmitSqlcVersion,
@@ -352,6 +412,16 @@ func generate(req *plugin.GenerateRequest, options *opts.Options, enums []Enum, 
 		querierFileName = options.OutputQuerierFileName
 	}
 
+	paramsFileName := "params.go"
+	if options.OutputParamsFileName != "" {
+		paramsFileName = options.OutputParamsFileName
+	}
+
+	rowResultsFileName := "row_results.go"
+	if options.OutputRowResultsFileName != "" {
+		rowResultsFileName = options.OutputRowResultsFileName
+	}
+
 	copyfromFileName := "copyfrom.go"
 	if options.OutputCopyfromFileName != "" {
 		copyfromFileName = options.OutputCopyfromFileName
@@ -366,12 +436,30 @@ func generate(req *plugin.GenerateRequest, options *opts.Options, enums []Enum, 
 	if options.OutputModelsPackage != "" {
 		modelsPackageName = options.OutputModelsPackage
 	}
+	paramsPackageName := options.Package
+	if options.OutputParamsPackage != "" {
+		paramsPackageName = options.OutputParamsPackage
+	}
+	rowResultsPackageName := options.Package
+	if options.OutputRowResultsPackage != "" {
+		rowResultsPackageName = options.OutputRowResultsPackage
+	}
 
 	if err := execute(dbFileName, options.Package, options.OutputDirectory, "dbFile"); err != nil {
 		return nil, err
 	}
 	if err := execute(modelsFileName, modelsPackageName, options.OutputModelsDirectory, "modelsFile"); err != nil {
 		return nil, err
+	}
+	if len(paramsList) > 0 {
+		if err := execute(paramsFileName, paramsPackageName, options.OutputParamsDirectory, "paramsFile"); err != nil {
+			return nil, err
+		}
+	}
+	if len(rowResultsList) > 0 {
+		if err := execute(rowResultsFileName, rowResultsPackageName, options.OutputRowResultsDirectory, "rowResultsFile"); err != nil {
+			return nil, err
+		}
 	}
 	if options.EmitInterface {
 		querierPackageName := options.Package

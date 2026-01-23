@@ -38,6 +38,12 @@ type Options struct {
 	OutputModelsFileName        string            `json:"output_models_file_name,omitempty" yaml:"output_models_file_name"`
 	OutputModelsDirectory       string            `json:"output_models_directory,omitempty" yaml:"output_models_directory"`
 	OutputModelsPackage         string            `json:"output_models_package,omitempty" yaml:"output_models_package"`
+	OutputParamsFileName        string            `json:"output_params_file_name,omitempty" yaml:"output_params_file_name"`
+	OutputParamsDirectory       string            `json:"output_params_directory,omitempty" yaml:"output_params_directory"`
+	OutputParamsPackage         string            `json:"output_params_package,omitempty" yaml:"output_params_package"`
+	OutputRowResultsFileName    string            `json:"output_row_results_file_name,omitempty" yaml:"output_row_results_file_name"`
+	OutputRowResultsDirectory   string            `json:"output_row_results_directory,omitempty" yaml:"output_row_results_directory"`
+	OutputRowResultsPackage     string            `json:"output_row_results_package,omitempty" yaml:"output_row_results_package"`
 	OutputQuerierFileName       string            `json:"output_querier_file_name,omitempty" yaml:"output_querier_file_name"`
 	OutputQuerierDirectory      string            `json:"output_querier_directory,omitempty" yaml:"output_querier_directory"`
 	OutputQuerierPackage        string            `json:"output_querier_package,omitempty" yaml:"output_querier_package"`
@@ -62,12 +68,25 @@ func (o *Options) importPath(dir string) string {
 	if dir == "" && o.OutputDirectory != "" {
 		dir = o.OutputDirectory
 	}
+	if dir == "" {
+		// When using split output directories, an empty directory means the base
+		// module path.
+		return o.BaseImportPath
+	}
 
 	return filepath.Join(o.BaseImportPath, dir)
 }
 
 func (o *Options) ModelsImportPath() string {
 	return o.importPath(o.OutputModelsDirectory)
+}
+
+func (o *Options) ParamsImportPath() string {
+	return o.importPath(o.OutputParamsDirectory)
+}
+
+func (o *Options) RowResultsImportPath() string {
+	return o.importPath(o.OutputRowResultsDirectory)
 }
 
 func (o *Options) QueryFilesImportPath() string {
@@ -177,15 +196,19 @@ func ValidateOpts(opts *Options) error {
 		return fmt.Errorf("invalid options: query parameter limit must not be negative")
 	}
 
-	output_package_opts := map[string]string{
-		"output_models_package":  opts.OutputModelsPackage,
-		"output_querier_package": opts.OutputQuerierPackage,
+	outputPackageOpts := map[string]string{
+		"output_models_package":      opts.OutputModelsPackage,
+		"output_params_package":      opts.OutputParamsPackage,
+		"output_row_results_package": opts.OutputRowResultsPackage,
+		"output_querier_package":     opts.OutputQuerierPackage,
 	}
-	for k, v := range output_package_opts {
+	for k, v := range outputPackageOpts {
 		if v != "" && opts.BaseImportPath == "" {
 			return fmt.Errorf("invalid options: base_import_path must be set when %s is used", k)
 		}
 	}
+
+	// Packages for split outputs default to `package` (set in parseOpts).
 
 	return nil
 }

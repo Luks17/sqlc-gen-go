@@ -9,4 +9,6 @@ const (
 	OutputFileInterface OutputFile = "interfaceFile"
 	OutputFileCopyfrom  OutputFile = "copyfromFile"
 	OutputFileBatch     OutputFile = "batchFile"
+	OutputFileParams    OutputFile = "paramsFile"
+	OutputFileRowResult OutputFile = "rowResultFile"
 )

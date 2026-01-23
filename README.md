@@ -15,6 +15,18 @@ There is a related issue on the sqlc repository:
   - Directory path for the models file. Used when models file will be placed in a different directory than `output_directory`. Defaults to the value of `output_directory` option.
 - `output_models_package`:
   - Package name of the models file. Used when models file is in a different package. Defaults to value of `package` option.
+- `output_params_file_name`:
+  - File name for params structs file. Defaults to `params.go`.
+- `output_params_directory`:
+  - Directory path for the params structs file. Defaults to the value of `output_directory` option.
+- `output_params_package`:
+  - Package name of the params structs file. Defaults to value of `package` option.
+- `output_row_results_file_name`:
+  - File name for row result structs file. Defaults to `row_results.go`.
+- `output_row_results_directory`:
+  - Directory path for the row result structs file. Defaults to the value of `output_directory` option.
+- `output_row_results_package`:
+  - Package name of the row result structs file. Defaults to value of `package` option.
 - `output_querier_directory`:
   - Directory path for the querier file. Used when querier file will be placed in a different directory than `output_directory`. Defaults to the value of `output_directory` option.
 - `output_querier_package`:
